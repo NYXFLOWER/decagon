@@ -4,6 +4,7 @@ from operator import itemgetter
 from itertools import combinations
 import time
 import os
+import csv
 
 import tensorflow as tf
 import numpy as np
@@ -26,6 +27,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ""
 # config.gpu_options.allow_growth = True
 
 np.random.seed(0)
+
 
 ###########################################################
 #
@@ -52,7 +54,7 @@ def get_accuracy_scores(edges_pos, edges_neg, edge_type):
     for u, v in edges_pos[edge_type[:2]][edge_type[2]]:
         score = sigmoid(rec[u, v])
         preds.append(score)
-        assert adj_mats_orig[edge_type[:2]][edge_type[2]][u,v] == 1, 'Problem 1'
+        assert adj_mats_orig[edge_type[:2]][edge_type[2]][u, v] == 1, 'Problem 1'
 
         actual.append(edge_ind)
         predicted.append((score, edge_ind))
@@ -62,7 +64,7 @@ def get_accuracy_scores(edges_pos, edges_neg, edge_type):
     for u, v in edges_neg[edge_type[:2]][edge_type[2]]:
         score = sigmoid(rec[u, v])
         preds_neg.append(score)
-        assert adj_mats_orig[edge_type[:2]][edge_type[2]][u,v] == 0, 'Problem 0'
+        assert adj_mats_orig[edge_type[:2]][edge_type[2]][u, v] == 0, 'Problem 0'
 
         predicted.append((score, edge_ind))
         edge_ind += 1
@@ -90,17 +92,41 @@ def construct_placeholders(edge_types):
     }
     placeholders.update({
         'adj_mats_%d,%d,%d' % (i, j, k): tf.sparse_placeholder(tf.float32)
-        for i, j in edge_types for k in range(edge_types[i,j])})
+        for i, j in edge_types for k in range(edge_types[i, j])})
     placeholders.update({
         'feat_%d' % i: tf.sparse_placeholder(tf.float32)
         for i, _ in edge_types})
     return placeholders
+
 
 ###########################################################
 #
 # Load and preprocess data (This is a dummy toy example!)
 #
 ###########################################################
+def get_gene_adj():
+    row, col = [], []
+    with open("data_decagon/bio-decagon-ppi.csv", 'r') as f:
+        ppi = csv.reader(f)
+        next(ppi)
+        for [r, c] in ppi:
+            row.append(int(r))
+            col.append(int(c))
+    adj = sp.csr_matrix(([1] * len(row), (row, col)))
+    return adj
+
+
+def get_gene_drug_adj():
+    row, col = [], []
+    with open("data_decagon/bio-decagon-targets.csv", 'r') as f:
+        gene_drug = csv.reader(f)
+        next(gene_drug)
+        for [c, r] in gene_drug:
+            row.append(int(r))
+            col.append(int(c))
+        adj = sp.csr_matrix(([1] * len(row), (row, col)))
+    return adj
+
 
 ####
 # The following code uses artificially generated and very small networks.
@@ -113,17 +139,21 @@ def construct_placeholders(edge_types):
 # (3) Train & test the model.
 ####
 
+
 val_test_size = 0.05
 n_genes = 500
 n_drugs = 400
 n_drugdrug_rel_types = 3
 gene_net = nx.planted_partition_graph(50, 10, 0.2, 0.05, seed=42)
 
-gene_adj = nx.adjacency_matrix(gene_net)
+# gene_adj = nx.adjacency_matrix(gene_net)
+gene_adj = get_gene_adj()
 gene_degrees = np.array(gene_adj.sum(axis=0)).squeeze()
 
-gene_drug_adj = sp.csr_matrix((10 * np.random.randn(n_genes, n_drugs) > 15).astype(int))
+# gene_drug_adj = sp.csr_matrix((10 * np.random.randn(n_genes, n_drugs) > 15).astype(int))
+gene_drug_adj = get_gene_drug_adj()
 drug_gene_adj = gene_drug_adj.transpose(copy=True)
+
 
 drug_drug_adj_list = []
 tmp = np.dot(drug_gene_adj, gene_drug_adj)
@@ -134,7 +164,6 @@ for i in range(n_drugdrug_rel_types):
             mat[d1, d2] = mat[d2, d1] = 1.
     drug_drug_adj_list.append(sp.csr_matrix(mat))
 drug_degrees_list = [np.array(drug_adj.sum(axis=0)).squeeze() for drug_adj in drug_drug_adj_list]
-
 
 # data representation
 adj_mats_orig = {
